@@ -1,0 +1,19 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "provider": {
+            "type": "string"
+        },
+        "symbols": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "wsUrl": {
+            "type": "string"
+        }
+    },
+    "required": ["provider", "symbols", "wsUrl"]
+}

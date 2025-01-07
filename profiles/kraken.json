@@ -1,0 +1,5 @@
+{
+    "provider": "kraken",
+    "symbols": ["BTC/USD"],
+    "wsUrl": "wss://ws.kraken.com/v2"
+}

@@ -1,0 +1,5 @@
+{
+    "provider": "coinbase",
+    "symbols": ["USDT-USD"],
+    "wsUrl": "wss://advanced-trade-ws.coinbase.com"
+}

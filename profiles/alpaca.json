@@ -1,0 +1,5 @@
+{
+    "provider": "alpaca",
+    "symbols": ["PLTR"],
+    "wsUrl": "wss://stream.data.alpaca.markets/v2/iex"
+}
