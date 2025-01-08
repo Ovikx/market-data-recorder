@@ -28,7 +28,7 @@ func TestCoinbaseTickWrites(t *testing.T) {
 	}
 
 	// Connect to the DB and start listening
-	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"))
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true)
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestCoinbaseTickWrites(t *testing.T) {
 		dbwriter.Pool().Exec(context.Background(), "DROP TABLE test_ticks")
 	}()
 
-	marketFeedConns, err := marketfeed.ConnectToCoinbaseMarketFeed("wss://advanced-trade-ws.coinbase.com", jwtgen.CoinbaseJWT, []string{"BTC-USD"})
+	marketFeedConns, _, err := marketfeed.ConnectToCoinbaseMarketFeed("wss://advanced-trade-ws.coinbase.com", jwtgen.CoinbaseJWT, []string{"BTC-USD"})
 	strategyAdapter := adapter.NewCoinbaseAdapter()
 
 	done := make(chan struct{})
@@ -117,7 +117,7 @@ func TestKrakenTickWrites(t *testing.T) {
 	}
 
 	// Connect to the DB and start listening
-	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"))
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true)
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
 	}

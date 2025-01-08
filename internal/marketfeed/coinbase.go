@@ -5,13 +5,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func ConnectToCoinbaseMarketFeed(wsUrl string, jwtGenerator func(uri string) (string, error), productIds []string) ([]*websocket.Conn, error) {
-	// Generate JWT for initial handshake
-	jwt, err := jwtGenerator(wsUrl)
-	if err != nil {
-		return nil, err
-	}
-
+func ConnectToCoinbaseMarketFeed(wsUrl string, jwtGenerator func(uri string) (string, error), productIds []string) ([]*websocket.Conn, []func() (*websocket.Conn, error), error) {
 	type subscriptionMsg struct {
 		Type       string   `json:"type"`
 		ProductIDs []string `json:"product_ids"`
@@ -20,29 +14,47 @@ func ConnectToCoinbaseMarketFeed(wsUrl string, jwtGenerator func(uri string) (st
 	}
 
 	conns := make([]*websocket.Conn, 0)
+	reconnectFuncs := make([]func() (*websocket.Conn, error), 0)
+
 	for _, id := range productIds {
-		// Subscribe to the ticker channel
-		conn, _, err := utils.SubscribeToWebsocket(wsUrl, nil, subscriptionMsg{
-			Type:       "subscribe",
-			ProductIDs: []string{id},
-			Channel:    "ticker",
-			JWT:        jwt,
-		})
-		if err != nil {
-			return nil, err
+		connectFunc := func() (*websocket.Conn, error) {
+			// Generate JWT for initial handshake
+			jwt, err := jwtGenerator(wsUrl)
+			if err != nil {
+				return nil, err
+			}
+
+			// Subscribe to the ticker channel
+			conn, _, err := utils.SubscribeToWebsocket(wsUrl, nil, subscriptionMsg{
+				Type:       "subscribe",
+				ProductIDs: []string{id},
+				Channel:    "ticker",
+				JWT:        jwt,
+			})
+			if err != nil {
+				return nil, err
+			}
+			err = conn.WriteJSON(subscriptionMsg{
+				Type:       "subscribe",
+				ProductIDs: []string{},
+				Channel:    "heartbeats",
+				JWT:        jwt,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return conn, err
 		}
-		err = conn.WriteJSON(subscriptionMsg{
-			Type:       "subscribe",
-			ProductIDs: []string{},
-			Channel:    "heartbeats",
-			JWT:        jwt,
-		})
+
+		conn, err := connectFunc()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+
 		conns = append(conns, conn)
+		reconnectFuncs = append(reconnectFuncs, connectFunc)
 	}
 
-	return conns, err
+	return conns, reconnectFuncs, nil
 
 }

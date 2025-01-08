@@ -20,7 +20,7 @@ func (a *blshCoinbaseAdapter) Reroute(data []byte, ticks chan Tick) error {
 	var channelNameStruct marketfeedmodels.CoinbaseChannelName
 	err := json.Unmarshal(data, &channelNameStruct)
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal data: %v", err)
+		return fmt.Errorf("failed to unmarshal data %v: %v", string(data), err)
 	}
 
 	switch channelNameStruct.Channel {

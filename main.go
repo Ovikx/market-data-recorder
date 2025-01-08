@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -22,6 +23,11 @@ type strategyAdapter interface {
 	Reroute(data []byte, ticks chan adapter.Tick) error
 }
 
+// Calculates the number of seconds to wait on the n-th reconnect retry
+func backoff(n int) int {
+	return 1 + n*n
+}
+
 func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
@@ -32,21 +38,26 @@ func main() {
 		log.Fatal("error loading .env file")
 	}
 
-	// Connect to the DB and start listening
-	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"))
-	if err != nil {
-		log.Fatalf("error connecting to db: %v", err)
-	}
-	go dbwriter.Record("ticks")
-	defer dbwriter.Close()
-
 	// Parse cmd line args
 	profilePathStr := flag.String("p", "", "path of the profile JSON file to use")
+	liveBool := flag.Bool("l", false, "whether received market data should be logged")
 	flag.Parse()
 
 	if *profilePathStr == "" {
 		log.Fatal("no profile provided")
 	}
+
+	if !*liveBool {
+		log.Printf("WARNING: NOT RECORDING DATA")
+	}
+
+	// Connect to the DB and start listening
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), *liveBool)
+	if err != nil {
+		log.Fatalf("error connecting to db: %v", err)
+	}
+	go dbwriter.Record("ticks")
+	defer dbwriter.Close()
 
 	// Load the profile
 	profile, err := profileloader.FromFile(*profilePathStr, "schemas/profile-schema.json")
@@ -59,10 +70,11 @@ func main() {
 
 	// Connect to market feed (websocket streams)
 	var marketFeedConns []*websocket.Conn
+	var reconnectFuncs []func() (*websocket.Conn, error)
 
 	switch profile.Provider {
 	case "coinbase":
-		marketFeedConns, err = marketfeed.ConnectToCoinbaseMarketFeed(profile.WSUrl, jwtgen.CoinbaseJWT, profile.Symbols)
+		marketFeedConns, reconnectFuncs, err = marketfeed.ConnectToCoinbaseMarketFeed(profile.WSUrl, jwtgen.CoinbaseJWT, profile.Symbols)
 		strategyAdapter = adapter.NewCoinbaseAdapter()
 	case "alpaca":
 		marketFeedConns, err = marketfeed.ConnectToAlpacaMarketFeed(profile.WSUrl, profile.Symbols)
@@ -84,9 +96,10 @@ func main() {
 	// Continuously read incoming messages from all channels
 	done := make(chan struct{})
 	numLive := atomic.Int32{}
+	numRetries := make([]int, len(marketFeedConns))
 
 	numLive.Store(int32(len(marketFeedConns)))
-	for i, conn := range marketFeedConns {
+	for i := 0; i < len(marketFeedConns); i++ {
 		go func() {
 			// Close done channel once there are no more live connections
 			defer func() {
@@ -96,17 +109,48 @@ func main() {
 				}
 			}()
 			for {
-				_, message, err := conn.ReadMessage()
+				_, message, err := marketFeedConns[i].ReadMessage()
 				if err != nil {
 					log.Printf("read error on conn %d: %v", i, err)
-					return
+
+					// Normal close
+					if strings.Contains(err.Error(), "close 1000") {
+						return
+					}
+
+					marketFeedConns[i].WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+					err = fmt.Errorf("dummy error")
+					var newConn *websocket.Conn
+					for err != nil {
+						// Fatalf after too many attempts
+						if numRetries[i] > 3 {
+							log.Fatalf("failed to reconnect on conn %d too many times", i)
+						}
+
+						// Wait
+						<-time.After(time.Duration(backoff(numRetries[i])) * time.Second)
+
+						// Attempt to reconnect
+						log.Printf("attempting to reconnect on conn %d (retry %d)", i, numRetries[i])
+						newConn, err = reconnectFuncs[i]()
+						if err != nil {
+							log.Printf("failed to reconnect on conn %d: %v", i, err)
+							numRetries[i]++
+						}
+					}
+
+					marketFeedConns[i] = newConn
+					numRetries[i] = 0
+					log.Printf("reconnected on conn %d", i)
+				} else {
+					err = strategyAdapter.Reroute(message, dbwriter.Ticks())
+					log.Println("read message", string(message))
+					if err != nil {
+						log.Println("failed to reroute market data:", err)
+						return
+					}
 				}
 
-				err = strategyAdapter.Reroute(message, dbwriter.Ticks())
-				if err != nil {
-					log.Println("failed to reroute market data:", err)
-					return
-				}
 			}
 		}()
 	}

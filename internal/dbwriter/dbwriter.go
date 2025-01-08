@@ -11,17 +11,18 @@ import (
 )
 
 type dbwriter struct {
-	ticks  chan adapter.Tick
-	pool   *pgxpool.Pool
-	errors chan error
+	ticks     chan adapter.Tick
+	pool      *pgxpool.Pool
+	errors    chan error
+	recording bool
 }
 
-func New(dbUrl string) (*dbwriter, error) {
+func New(dbUrl string, recording bool) (*dbwriter, error) {
 	pool, err := pgxpool.New(context.Background(), dbUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pool: %v", err)
 	}
-	return &dbwriter{ticks: make(chan adapter.Tick), pool: pool}, nil
+	return &dbwriter{ticks: make(chan adapter.Tick), pool: pool, recording: recording}, nil
 }
 
 func (d *dbwriter) Record(tableName string) {
@@ -29,13 +30,18 @@ func (d *dbwriter) Record(tableName string) {
 		select {
 		case t := <-d.ticks:
 			go func() {
-				log.Println("WRITING", t)
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-				defer cancel()
-				_, err := d.pool.Exec(ctx, fmt.Sprintf("INSERT INTO %s (symbol, price, timestamp) VALUES ($1, $2, $3)", tableName), t.Symbol(), t.Price(), t.Timestamp().UnixNano())
-				if err != nil {
-					d.errors <- fmt.Errorf("failed to write to db: %v", err)
+				if !d.recording {
+					log.Println("RECEIVED", t)
+				} else {
+					log.Println("WRITING", t)
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					_, err := d.pool.Exec(ctx, fmt.Sprintf("INSERT INTO %s (symbol, price, timestamp) VALUES ($1, $2, $3)", tableName), t.Symbol(), t.Price(), t.Timestamp().UnixNano())
+					if err != nil {
+						d.errors <- fmt.Errorf("failed to write to db: %v", err)
+					}
 				}
+
 			}()
 		}
 	}
