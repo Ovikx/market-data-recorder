@@ -3,6 +3,7 @@ package dbwriter
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/Ovikx/market-data-recorder/internal/adapter"
@@ -28,6 +29,7 @@ func (d *dbwriter) Record(tableName string) {
 		select {
 		case t := <-d.ticks:
 			go func() {
+				log.Println("WRITING", t)
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
 				_, err := d.pool.Exec(ctx, fmt.Sprintf("INSERT INTO %s (symbol, price, timestamp) VALUES ($1, $2, $3)", tableName), t.Symbol(), t.Price(), t.Timestamp().UnixNano())
