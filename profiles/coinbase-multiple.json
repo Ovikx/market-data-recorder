@@ -1,5 +1,5 @@
 {
     "provider": "coinbase",
-    "symbols": ["BTC-USD"],
+    "symbols": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD"],
     "wsUrl": "wss://advanced-trade-ws.coinbase.com"
 }

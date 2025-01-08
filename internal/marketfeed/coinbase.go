@@ -19,66 +19,30 @@ func ConnectToCoinbaseMarketFeed(wsUrl string, jwtGenerator func(uri string) (st
 		JWT        string   `json:"jwt"`
 	}
 
-	// Subscribe to the order book channel
-	orderBookConn, _, err := utils.SubscribeToWebsocket(wsUrl, nil, subscriptionMsg{
-		Type:       "subscribe",
-		ProductIDs: productIds,
-		Channel:    "level2",
-		JWT:        jwt,
-	})
-	if err != nil {
-		return nil, err
-	}
-	err = orderBookConn.WriteJSON(subscriptionMsg{
-		Type:       "subscribe",
-		ProductIDs: []string{},
-		Channel:    "heartbeats",
-		JWT:        jwt,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Subscribe to the trades channel
-	tradesConn, _, err := utils.SubscribeToWebsocket(wsUrl, nil, subscriptionMsg{
-		Type:       "subscribe",
-		ProductIDs: productIds,
-		Channel:    "market_trades",
-		JWT:        jwt,
-	})
-	if err != nil {
-		return nil, err
-	}
-	err = tradesConn.WriteJSON(subscriptionMsg{
-		Type:       "subscribe",
-		ProductIDs: []string{},
-		Channel:    "heartbeats",
-		JWT:        jwt,
-	})
-	if err != nil {
-		return nil, err
+	conns := make([]*websocket.Conn, 0)
+	for _, id := range productIds {
+		// Subscribe to the ticker channel
+		conn, _, err := utils.SubscribeToWebsocket(wsUrl, nil, subscriptionMsg{
+			Type:       "subscribe",
+			ProductIDs: []string{id},
+			Channel:    "ticker",
+			JWT:        jwt,
+		})
+		if err != nil {
+			return nil, err
+		}
+		err = conn.WriteJSON(subscriptionMsg{
+			Type:       "subscribe",
+			ProductIDs: []string{},
+			Channel:    "heartbeats",
+			JWT:        jwt,
+		})
+		if err != nil {
+			return nil, err
+		}
+		conns = append(conns, conn)
 	}
 
-	// Subscribe to the ticker channel
-	tickerConn, _, err := utils.SubscribeToWebsocket(wsUrl, nil, subscriptionMsg{
-		Type:       "subscribe",
-		ProductIDs: productIds,
-		Channel:    "ticker",
-		JWT:        jwt,
-	})
-	if err != nil {
-		return nil, err
-	}
-	err = tickerConn.WriteJSON(subscriptionMsg{
-		Type:       "subscribe",
-		ProductIDs: []string{},
-		Channel:    "heartbeats",
-		JWT:        jwt,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return []*websocket.Conn{tradesConn, orderBookConn, tickerConn}, err
+	return conns, err
 
 }
