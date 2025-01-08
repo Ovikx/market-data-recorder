@@ -9,21 +9,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Ovikx/market-data-recorder/internal/adapter"
+	"github.com/Ovikx/market-data-recorder/internal/dbwriter"
 	"github.com/Ovikx/market-data-recorder/internal/jwtgen"
 	"github.com/Ovikx/market-data-recorder/internal/marketfeed"
 	"github.com/Ovikx/market-data-recorder/internal/profileloader"
-	"github.com/Ovikx/market-data-recorder/internal/strategy/blsh"
-	"github.com/Ovikx/market-data-recorder/internal/strategyadapters/blshadapters"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 )
 
 type strategyAdapter interface {
-	Reroute(data []byte) error
-}
-
-type strategy interface {
-	Start() error
+	Reroute(data []byte, ticks chan adapter.Tick) error
 }
 
 func main() {
@@ -36,10 +32,16 @@ func main() {
 		log.Fatal("error loading .env file")
 	}
 
+	// Connect to the DB and start listening
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"))
+	if err != nil {
+		log.Fatalf("error connecting to db: %v", err)
+	}
+	go dbwriter.Record("ticks")
+	defer dbwriter.Close()
+
 	// Parse cmd line args
 	profilePathStr := flag.String("p", "", "path of the profile JSON file to use")
-	_ = flag.Bool("record", false, "Whether to record received market data")
-	_ = flag.Bool("live", false, "Whether to trade using real money") // TODO: pass the returned val to whatever makes trades
 	flag.Parse()
 
 	if *profilePathStr == "" {
@@ -52,11 +54,6 @@ func main() {
 		log.Fatalf("failed to load profile %v: %v", *profilePathStr, err)
 	}
 
-	// Start the strategy
-	// TODO: make dynamic strategy selection (from cmd line maybe idk)
-	s := blsh.New()
-	go s.Start()
-
 	// Adapter (for sending the right WS messages to the right Go channels)
 	var strategyAdapter strategyAdapter
 
@@ -66,13 +63,13 @@ func main() {
 	switch profile.Provider {
 	case "coinbase":
 		marketFeedConns, err = marketfeed.ConnectToCoinbaseMarketFeed(profile.WSUrl, jwtgen.CoinbaseJWT, profile.Symbols)
-		strategyAdapter = blshadapters.NewCoinbaseAdapter(s)
+		strategyAdapter = adapter.NewCoinbaseAdapter()
 	case "alpaca":
 		marketFeedConns, err = marketfeed.ConnectToAlpacaMarketFeed(profile.WSUrl, profile.Symbols)
-		strategyAdapter = blshadapters.NewCoinbaseAdapter(s)
+		strategyAdapter = adapter.NewCoinbaseAdapter()
 	case "kraken":
 		marketFeedConns, err = marketfeed.ConnectToKrakenMarketFeed(profile.WSUrl, profile.Symbols)
-		strategyAdapter = blshadapters.NewKrakenAdapter(s)
+		strategyAdapter = adapter.NewKrakenAdapter()
 	}
 
 	if err != nil {
@@ -105,7 +102,7 @@ func main() {
 					return
 				}
 
-				err = strategyAdapter.Reroute(message)
+				err = strategyAdapter.Reroute(message, dbwriter.Ticks())
 				if err != nil {
 					log.Println("failed to reroute market data:", err)
 					return
@@ -116,6 +113,8 @@ func main() {
 
 	for {
 		select {
+		case e := <-dbwriter.Errors():
+			log.Printf("db error: %v", e)
 		case <-done:
 			fmt.Println("Done")
 			return
