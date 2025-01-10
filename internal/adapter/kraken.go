@@ -15,7 +15,7 @@ func NewKrakenAdapter() *blshKrakenAdapter {
 	return &blshKrakenAdapter{}
 }
 
-func (a *blshKrakenAdapter) Reroute(data []byte, ticks chan Tick) error {
+func (a *blshKrakenAdapter) Reroute(data []byte, ticks chan Tick, orders chan Order) error {
 	var channelNameStruct marketfeedmodels.KrakenChannelName
 	err := json.Unmarshal(data, &channelNameStruct)
 	if err != nil {
@@ -23,35 +23,35 @@ func (a *blshKrakenAdapter) Reroute(data []byte, ticks chan Tick) error {
 	}
 
 	switch channelNameStruct.Channel {
-	// case "book":
-	// 	var msg marketfeedmodels.KrakenBookMessage
-	// 	if err := json.Unmarshal(data, &msg); err != nil {
-	// 		return fmt.Errorf("failed to unmarshal book message: %v", err)
-	// 	}
+	case "book":
+		var msg marketfeedmodels.KrakenBookMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("failed to unmarshal book message: %v", err)
+		}
 
-	// 	// Ignore snapshots
-	// 	if msg.Type == "snapshot" {
-	// 		return nil
-	// 	}
+		// Ignore snapshots
+		if msg.Type == "snapshot" {
+			return nil
+		}
 
-	// 	// Kraken expects a singular object to be in the `Data` array
-	// 	if len(msg.Data) != 1 {
-	// 		return fmt.Errorf("unexpected number of items in book message data: expected 1, got %d", len(msg.Data))
-	// 	}
+		// Kraken expects a singular object to be in the `Data` array
+		if len(msg.Data) != 1 {
+			return fmt.Errorf("unexpected number of items in book message data: expected 1, got %d", len(msg.Data))
+		}
 
-	// 	data := msg.Data[0]
+		data := msg.Data[0]
 
-	// 	time, err := time.Parse(time.RFC3339Nano, data.Timestamp)
-	// 	if err != nil {
-	// 		return fmt.Errorf("unable to parse time %s: %v", data.Timestamp, err)
-	// 	}
+		time, err := time.Parse(time.RFC3339Nano, data.Timestamp)
+		if err != nil {
+			return fmt.Errorf("unable to parse time %s: %v", data.Timestamp, err)
+		}
 
-	// 	for _, ask := range data.Asks {
-	// 		a.Orders() <- strategyprimitives.NewOrder(data.Symbol, 0, ask.Price, ask.Qty, time)
-	// 	}
-	// 	for _, bid := range data.Bids {
-	// 		a.Orders() <- strategyprimitives.NewOrder(data.Symbol, 1, bid.Price, bid.Qty, time)
-	// 	}
+		for _, ask := range data.Asks {
+			orders <- strategyprimitives.NewOrder(data.Symbol, 0, ask.Price, ask.Qty, time)
+		}
+		for _, bid := range data.Bids {
+			orders <- strategyprimitives.NewOrder(data.Symbol, 1, bid.Price, bid.Qty, time)
+		}
 	// case "trade":
 	// 	var msg marketfeedmodels.KrakenTradeMessage
 	// 	if err := json.Unmarshal(data, &msg); err != nil {

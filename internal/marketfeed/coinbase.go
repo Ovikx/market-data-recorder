@@ -16,43 +16,45 @@ func ConnectToCoinbaseMarketFeed(wsUrl string, jwtGenerator func(uri string) (st
 	conns := make([]*websocket.Conn, 0)
 	reconnectFuncs := make([]func() (*websocket.Conn, error), 0)
 
-	for _, id := range productIds {
-		connectFunc := func() (*websocket.Conn, error) {
-			// Generate JWT for initial handshake
-			jwt, err := jwtGenerator(wsUrl)
-			if err != nil {
-				return nil, err
+	for _, channel := range []string{"ticker", "level2"} {
+		for _, id := range productIds {
+			connectFunc := func() (*websocket.Conn, error) {
+				// Generate JWT for initial handshake
+				jwt, err := jwtGenerator(wsUrl)
+				if err != nil {
+					return nil, err
+				}
+
+				// Subscribe to the ticker channel
+				conn, _, err := utils.SubscribeToWebsocket(wsUrl, nil, subscriptionMsg{
+					Type:       "subscribe",
+					ProductIDs: []string{id},
+					Channel:    channel,
+					JWT:        jwt,
+				})
+				if err != nil {
+					return nil, err
+				}
+				err = conn.WriteJSON(subscriptionMsg{
+					Type:       "subscribe",
+					ProductIDs: []string{},
+					Channel:    "heartbeats",
+					JWT:        jwt,
+				})
+				if err != nil {
+					return nil, err
+				}
+				return conn, err
 			}
 
-			// Subscribe to the ticker channel
-			conn, _, err := utils.SubscribeToWebsocket(wsUrl, nil, subscriptionMsg{
-				Type:       "subscribe",
-				ProductIDs: []string{id},
-				Channel:    "ticker",
-				JWT:        jwt,
-			})
+			conn, err := connectFunc()
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			err = conn.WriteJSON(subscriptionMsg{
-				Type:       "subscribe",
-				ProductIDs: []string{},
-				Channel:    "heartbeats",
-				JWT:        jwt,
-			})
-			if err != nil {
-				return nil, err
-			}
-			return conn, err
+
+			conns = append(conns, conn)
+			reconnectFuncs = append(reconnectFuncs, connectFunc)
 		}
-
-		conn, err := connectFunc()
-		if err != nil {
-			return nil, nil, err
-		}
-
-		conns = append(conns, conn)
-		reconnectFuncs = append(reconnectFuncs, connectFunc)
 	}
 
 	return conns, reconnectFuncs, nil

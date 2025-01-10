@@ -20,7 +20,7 @@ import (
 )
 
 type strategyAdapter interface {
-	Reroute(data []byte, ticks chan adapter.Tick) error
+	Reroute(data []byte, ticks chan adapter.Tick, orders chan adapter.Order) error
 }
 
 // Calculates the number of seconds to wait on the n-th reconnect retry
@@ -56,7 +56,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
 	}
-	go dbwriter.Record("ticks")
+	go dbwriter.Record("ticks", "orders")
 	defer dbwriter.Close()
 
 	// Load the profile
@@ -143,8 +143,7 @@ func main() {
 					numRetries[i] = 0
 					log.Printf("reconnected on conn %d", i)
 				} else {
-					err = strategyAdapter.Reroute(message, dbwriter.Ticks())
-					log.Println("read message", string(message))
+					err = strategyAdapter.Reroute(message, dbwriter.Ticks(), dbwriter.Orders())
 					if err != nil {
 						log.Println("failed to reroute market data:", err)
 						return
