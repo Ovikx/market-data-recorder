@@ -35,7 +35,7 @@ func TestCoinbaseTickWrites(t *testing.T) {
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
 	}
-	go dbwriter.Record("test_ticks", "orders")
+	go dbwriter.Record("test_ticks", "test_orders")
 	defer dbwriter.Close()
 
 	// Create test table
