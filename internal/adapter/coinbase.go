@@ -25,6 +25,9 @@ func (a *blshCoinbaseAdapter) Reroute(data []byte, ticks chan Tick, orders chan 
 
 	switch channelNameStruct.Channel {
 	case "l2_data":
+		if orders == nil {
+			break
+		}
 		var msg marketfeedmodels.CoinbaseL2Message
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return fmt.Errorf("failed to unmarshal l2_data message: %v", err)
@@ -93,6 +96,9 @@ func (a *blshCoinbaseAdapter) Reroute(data []byte, ticks chan Tick, orders chan 
 	// 		}
 	// 	}
 	case "ticker":
+		if ticks == nil {
+			break
+		}
 		var msg marketfeedmodels.CoinbaseTickerMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return fmt.Errorf("failed to unmarshal ticker message: %v", err)

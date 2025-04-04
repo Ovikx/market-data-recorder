@@ -17,10 +17,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type rerouter interface {
-	Reroute(data []byte, ticks chan adapter.Tick) error
-}
-
 func TestCoinbaseTickWrites(t *testing.T) {
 	log.SetOutput(io.Discard)
 
@@ -30,8 +26,12 @@ func TestCoinbaseTickWrites(t *testing.T) {
 		log.Fatal("error loading .env file")
 	}
 
+	// Create the channels
+	ticks := make(chan adapter.Tick)
+	orders := make(chan adapter.Order)
+
 	// Connect to the DB and start listening
-	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true)
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true, ticks, orders)
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
 	}
@@ -49,6 +49,10 @@ func TestCoinbaseTickWrites(t *testing.T) {
 	}()
 
 	marketFeedConns, _, err := marketfeed.ConnectToCoinbaseMarketFeed("wss://advanced-trade-ws.coinbase.com", jwtgen.CoinbaseJWT, []string{"BTC-USD"})
+	if err != nil {
+		t.Error(err)
+		return
+	}
 	strategyAdapter := adapter.NewCoinbaseAdapter()
 
 	done := make(chan struct{})
@@ -219,8 +223,12 @@ func TestCoinbaseOrderWrites(t *testing.T) {
 		log.Fatal("error loading .env file")
 	}
 
+	// Create the channels
+	ticks := make(chan adapter.Tick)
+	orders := make(chan adapter.Order)
+
 	// Connect to the DB and start listening
-	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true)
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true, ticks, orders)
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
 	}
@@ -238,6 +246,10 @@ func TestCoinbaseOrderWrites(t *testing.T) {
 	}()
 
 	marketFeedConns, _, err := marketfeed.ConnectToCoinbaseMarketFeed("wss://advanced-trade-ws.coinbase.com", jwtgen.CoinbaseJWT, []string{"BTC-USD"})
+	if err != nil {
+		t.Error(err)
+		return
+	}
 	strategyAdapter := adapter.NewCoinbaseAdapter()
 
 	done := make(chan struct{})

@@ -18,12 +18,12 @@ type dbwriter struct {
 	recording bool
 }
 
-func New(dbUrl string, recording bool) (*dbwriter, error) {
+func New(dbUrl string, recording bool, ticks chan adapter.Tick, orders chan adapter.Order) (*dbwriter, error) {
 	pool, err := pgxpool.New(context.Background(), dbUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pool: %v", err)
 	}
-	return &dbwriter{ticks: make(chan adapter.Tick), orders: make(chan adapter.Order), pool: pool, recording: recording}, nil
+	return &dbwriter{ticks: ticks, orders: orders, pool: pool, recording: recording}, nil
 }
 
 func (d *dbwriter) Record(ticksTableName string, ordersTableName string) {

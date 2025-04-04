@@ -41,6 +41,8 @@ func main() {
 	// Parse cmd line args
 	profilePathStr := flag.String("p", "", "path of the profile JSON file to use")
 	liveBool := flag.Bool("l", false, "whether received market data should be logged")
+	tickBool := flag.Bool("t", false, "whether to record ticks")
+	orderBool := flag.Bool("o", false, "whether to record orders")
 	flag.Parse()
 
 	if *profilePathStr == "" {
@@ -52,7 +54,15 @@ func main() {
 	}
 
 	// Connect to the DB and start listening
-	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), *liveBool)
+	var ticks chan adapter.Tick
+	var orders chan adapter.Order
+	if *tickBool {
+		ticks = make(chan adapter.Tick)
+	}
+	if *orderBool {
+		orders = make(chan adapter.Order)
+	}
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), *liveBool, ticks, orders)
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
 	}
