@@ -20,7 +20,7 @@ import (
 )
 
 type strategyAdapter interface {
-	Reroute(data []byte, ticks chan adapter.Tick, orders chan adapter.Order) error
+	Reroute(data []byte, ticks chan adapter.Tick, orders chan adapter.Order, trades chan adapter.Trade) error
 }
 
 // Calculates the number of seconds to wait on the n-th reconnect retry
@@ -41,8 +41,9 @@ func main() {
 	// Parse cmd line args
 	profilePathStr := flag.String("p", "", "path of the profile JSON file to use")
 	liveBool := flag.Bool("l", false, "whether received market data should be logged")
-	tickBool := flag.Bool("t", false, "whether to record ticks")
-	orderBool := flag.Bool("o", false, "whether to record orders")
+	tickBool := flag.Bool("tick", false, "whether to record ticks")
+	orderBool := flag.Bool("order", false, "whether to record orders")
+	tradeBool := flag.Bool("trade", false, "whether to record trades")
 	flag.Parse()
 
 	if *profilePathStr == "" {
@@ -56,17 +57,21 @@ func main() {
 	// Connect to the DB and start listening
 	var ticks chan adapter.Tick
 	var orders chan adapter.Order
+	var trades chan adapter.Trade
 	if *tickBool {
 		ticks = make(chan adapter.Tick)
 	}
 	if *orderBool {
 		orders = make(chan adapter.Order)
 	}
-	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), *liveBool, ticks, orders)
+	if *tradeBool {
+		trades = make(chan adapter.Trade)
+	}
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), *liveBool, ticks, orders, trades)
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
 	}
-	go dbwriter.Record("ticks", "orders")
+	go dbwriter.Record("ticks", "orders", "trades")
 	defer dbwriter.Close()
 
 	// Load the profile
@@ -84,7 +89,7 @@ func main() {
 
 	switch profile.Provider {
 	case "coinbase":
-		marketFeedConns, reconnectFuncs, err = marketfeed.ConnectToCoinbaseMarketFeed(profile.WSUrl, jwtgen.CoinbaseJWT, profile.Symbols)
+		marketFeedConns, reconnectFuncs, err = marketfeed.ConnectToCoinbaseMarketFeed(profile.WSUrl, jwtgen.CoinbaseJWT, profile.Symbols, *tickBool, *orderBool, *tradeBool)
 		strategyAdapter = adapter.NewCoinbaseAdapter()
 	case "alpaca":
 		marketFeedConns, err = marketfeed.ConnectToAlpacaMarketFeed(profile.WSUrl, profile.Symbols)
@@ -153,7 +158,7 @@ func main() {
 					numRetries[i] = 0
 					log.Printf("reconnected on conn %d", i)
 				} else {
-					err = strategyAdapter.Reroute(message, dbwriter.Ticks(), dbwriter.Orders())
+					err = strategyAdapter.Reroute(message, dbwriter.Ticks(), dbwriter.Orders(), dbwriter.Trades())
 					if err != nil {
 						log.Println("failed to reroute market data:", err)
 						return

@@ -13,20 +13,21 @@ import (
 type dbwriter struct {
 	ticks     chan adapter.Tick
 	orders    chan adapter.Order
+	trades    chan adapter.Trade
 	pool      *pgxpool.Pool
 	errors    chan error
 	recording bool
 }
 
-func New(dbUrl string, recording bool, ticks chan adapter.Tick, orders chan adapter.Order) (*dbwriter, error) {
+func New(dbUrl string, recording bool, ticks chan adapter.Tick, orders chan adapter.Order, trades chan adapter.Trade) (*dbwriter, error) {
 	pool, err := pgxpool.New(context.Background(), dbUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pool: %v", err)
 	}
-	return &dbwriter{ticks: ticks, orders: orders, pool: pool, recording: recording}, nil
+	return &dbwriter{ticks: ticks, orders: orders, trades: trades, pool: pool, recording: recording}, nil
 }
 
-func (d *dbwriter) Record(ticksTableName string, ordersTableName string) {
+func (d *dbwriter) Record(ticksTableName string, ordersTableName string, tradesTableName string) {
 	for {
 		select {
 		case t := <-d.ticks:
@@ -60,6 +61,22 @@ func (d *dbwriter) Record(ticksTableName string, ordersTableName string) {
 					}
 				}
 			}()
+		case t := <-d.trades:
+			go func() {
+				if t.Size() > 0 {
+					if !d.recording {
+						log.Println("RECEIVED", t)
+					} else {
+						log.Println("WRITING", t)
+						ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+						defer cancel()
+						_, err := d.pool.Exec(ctx, fmt.Sprintf("INSERT INTO %s (symbol, side, price, size, timestamp) VALUES ($1, $2, $3, $4, $5)", tradesTableName), t.Symbol(), t.Side(), t.Price(), t.Size(), t.Timestamp().UnixNano())
+						if err != nil {
+							d.errors <- fmt.Errorf("failed to write to db: %v", err)
+						}
+					}
+				}
+			}()
 		}
 	}
 }
@@ -70,6 +87,10 @@ func (d *dbwriter) Ticks() chan adapter.Tick {
 
 func (d *dbwriter) Orders() chan adapter.Order {
 	return d.orders
+}
+
+func (d *dbwriter) Trades() chan adapter.Trade {
+	return d.trades
 }
 
 func (d *dbwriter) Pool() *pgxpool.Pool {

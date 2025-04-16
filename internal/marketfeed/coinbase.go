@@ -5,7 +5,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func ConnectToCoinbaseMarketFeed(wsUrl string, jwtGenerator func(uri string) (string, error), productIds []string) ([]*websocket.Conn, []func() (*websocket.Conn, error), error) {
+func ConnectToCoinbaseMarketFeed(wsUrl string, jwtGenerator func(uri string) (string, error), productIds []string, ticks, orders, trades bool) ([]*websocket.Conn, []func() (*websocket.Conn, error), error) {
 	type subscriptionMsg struct {
 		Type       string   `json:"type"`
 		ProductIDs []string `json:"product_ids"`
@@ -16,7 +16,17 @@ func ConnectToCoinbaseMarketFeed(wsUrl string, jwtGenerator func(uri string) (st
 	conns := make([]*websocket.Conn, 0)
 	reconnectFuncs := make([]func() (*websocket.Conn, error), 0)
 
-	for _, channel := range []string{"ticker", "level2"} {
+	chs := make([]string, 0)
+	if ticks {
+		chs = append(chs, "ticker")
+	}
+	if orders {
+		chs = append(chs, "level2")
+	}
+	if trades {
+		chs = append(chs, "market_trades")
+	}
+	for _, channel := range chs {
 		for _, id := range productIds {
 			connectFunc := func() (*websocket.Conn, error) {
 				// Generate JWT for initial handshake

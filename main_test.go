@@ -29,13 +29,14 @@ func TestCoinbaseTickWrites(t *testing.T) {
 	// Create the channels
 	ticks := make(chan adapter.Tick)
 	orders := make(chan adapter.Order)
+	trades := make(chan adapter.Trade)
 
 	// Connect to the DB and start listening
-	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true, ticks, orders)
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true, ticks, orders, trades)
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
 	}
-	go dbwriter.Record("test_ticks", "test_orders")
+	go dbwriter.Record("test_ticks", "test_orders", "test_trades")
 	defer dbwriter.Close()
 
 	// Create test table
@@ -48,7 +49,7 @@ func TestCoinbaseTickWrites(t *testing.T) {
 		dbwriter.Pool().Exec(context.Background(), "DROP TABLE test_ticks")
 	}()
 
-	marketFeedConns, _, err := marketfeed.ConnectToCoinbaseMarketFeed("wss://advanced-trade-ws.coinbase.com", jwtgen.CoinbaseJWT, []string{"BTC-USD"})
+	marketFeedConns, _, err := marketfeed.ConnectToCoinbaseMarketFeed("wss://advanced-trade-ws.coinbase.com", jwtgen.CoinbaseJWT, []string{"BTC-USD"}, true, false, false)
 	if err != nil {
 		t.Error(err)
 		return
@@ -76,7 +77,7 @@ func TestCoinbaseTickWrites(t *testing.T) {
 					return
 				}
 
-				err = strategyAdapter.Reroute(message, dbwriter.Ticks(), dbwriter.Orders())
+				err = strategyAdapter.Reroute(message, dbwriter.Ticks(), dbwriter.Orders(), dbwriter.Trades())
 				if err != nil {
 					t.Errorf("failed to reroute market data: %v", err)
 				}
@@ -226,13 +227,14 @@ func TestCoinbaseOrderWrites(t *testing.T) {
 	// Create the channels
 	ticks := make(chan adapter.Tick)
 	orders := make(chan adapter.Order)
+	trades := make(chan adapter.Trade)
 
 	// Connect to the DB and start listening
-	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true, ticks, orders)
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true, ticks, orders, trades)
 	if err != nil {
 		log.Fatalf("error connecting to db: %v", err)
 	}
-	go dbwriter.Record("test_ticks", "test_orders")
+	go dbwriter.Record("test_ticks", "test_orders", "test_trades")
 	defer dbwriter.Close()
 
 	// Create test table
@@ -245,7 +247,7 @@ func TestCoinbaseOrderWrites(t *testing.T) {
 		dbwriter.Pool().Exec(context.Background(), "DROP TABLE test_orders")
 	}()
 
-	marketFeedConns, _, err := marketfeed.ConnectToCoinbaseMarketFeed("wss://advanced-trade-ws.coinbase.com", jwtgen.CoinbaseJWT, []string{"BTC-USD"})
+	marketFeedConns, _, err := marketfeed.ConnectToCoinbaseMarketFeed("wss://advanced-trade-ws.coinbase.com", jwtgen.CoinbaseJWT, []string{"BTC-USD"}, false, true, false)
 	if err != nil {
 		t.Error(err)
 		return
@@ -273,7 +275,7 @@ func TestCoinbaseOrderWrites(t *testing.T) {
 					return
 				}
 
-				err = strategyAdapter.Reroute(message, dbwriter.Ticks(), dbwriter.Orders())
+				err = strategyAdapter.Reroute(message, dbwriter.Ticks(), dbwriter.Orders(), dbwriter.Trades())
 				if err != nil {
 					t.Errorf("failed to reroute market data: %v", err)
 				}
@@ -297,6 +299,109 @@ func TestCoinbaseOrderWrites(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			rows, err := dbwriter.Pool().Query(ctx, "SELECT id FROM test_orders")
+			if err != nil {
+				t.Error(err)
+			}
+			defer rows.Close()
+			numAddedActual := 0
+			for rows.Next() {
+				numAddedActual++
+			}
+			if numAddedActual == 0 {
+				t.Error("didn't add any rows")
+			}
+			if numAddedExpected.Load() == 0 {
+				t.Errorf("didn't find any messages to add")
+			}
+			return
+		}
+	}
+}
+
+func TestCoinbaseTradeWrites(t *testing.T) {
+	log.SetOutput(io.Discard)
+
+	// Load the .env file variables
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("error loading .env file")
+	}
+
+	// Create the channels
+	ticks := make(chan adapter.Tick)
+	orders := make(chan adapter.Order)
+	trades := make(chan adapter.Trade)
+
+	// Connect to the DB and start listening
+	dbwriter, err := dbwriter.New(os.Getenv("POSTGRES_URL"), true, ticks, orders, trades)
+	if err != nil {
+		log.Fatalf("error connecting to db: %v", err)
+	}
+	go dbwriter.Record("test_ticks", "test_orders", "test_trades")
+	defer dbwriter.Close()
+
+	// Create test table
+	dbwriter.Pool().Exec(context.Background(), "DROP TABLE test_trades")
+	_, err = dbwriter.Pool().Exec(context.Background(), "CREATE TABLE test_trades (LIKE orders INCLUDING ALL)")
+	if err != nil {
+		t.Errorf("failed to create dummy db")
+	}
+	defer func() {
+		dbwriter.Pool().Exec(context.Background(), "DROP TABLE test_trades")
+	}()
+
+	marketFeedConns, _, err := marketfeed.ConnectToCoinbaseMarketFeed("wss://advanced-trade-ws.coinbase.com", jwtgen.CoinbaseJWT, []string{"BTC-USD"}, false, false, true)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	strategyAdapter := adapter.NewCoinbaseAdapter()
+
+	done := make(chan struct{})
+	numLive := atomic.Int32{}
+	numAddedExpected := atomic.Int32{}
+
+	numLive.Store(int32(len(marketFeedConns)))
+	for i, conn := range marketFeedConns {
+		go func() {
+			// Close done channel once there are no more live connections
+			defer func() {
+				numLive.Add(-1)
+				if numLive.Load() == 0 {
+					close(done)
+				}
+			}()
+			for {
+				_, message, err := conn.ReadMessage()
+				if err != nil {
+					log.Printf("read error on conn %d: %v", i, err)
+					return
+				}
+
+				err = strategyAdapter.Reroute(message, dbwriter.Ticks(), dbwriter.Orders(), dbwriter.Trades())
+				if err != nil {
+					t.Errorf("failed to reroute market data: %v", err)
+				}
+				if strings.Contains(string(message), "market_trades") && strings.Contains(string(message), "update") {
+					numAddedExpected.Add(1)
+				}
+			}
+		}()
+	}
+
+	go func() {
+		<-time.After(3 * time.Second)
+		close(done)
+	}()
+
+	for {
+		select {
+		case e := <-dbwriter.Errors():
+			t.Errorf("db error: %v", e)
+		case <-done:
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			rows, err := dbwriter.Pool().Query(ctx, "SELECT id FROM test_trades")
 			if err != nil {
 				t.Error(err)
 			}

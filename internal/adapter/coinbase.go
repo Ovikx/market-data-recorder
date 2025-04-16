@@ -16,7 +16,7 @@ func NewCoinbaseAdapter() *blshCoinbaseAdapter {
 	return &blshCoinbaseAdapter{}
 }
 
-func (a *blshCoinbaseAdapter) Reroute(data []byte, ticks chan Tick, orders chan Order) error {
+func (a *blshCoinbaseAdapter) Reroute(data []byte, ticks chan Tick, orders chan Order, trades chan Trade) error {
 	var channelNameStruct marketfeedmodels.CoinbaseChannelName
 	err := json.Unmarshal(data, &channelNameStruct)
 	if err != nil {
@@ -62,39 +62,39 @@ func (a *blshCoinbaseAdapter) Reroute(data []byte, ticks chan Tick, orders chan 
 				}
 			}
 		}
-	// case "market_trades":
-	// 	var tradesMsg marketfeedmodels.CoinbaseTradesMessage
-	// 	if err := json.Unmarshal(data, &tradesMsg); err != nil {
-	// 		return fmt.Errorf("failed to unmarshal market_trades message: %v", err)
-	// 	}
+	case "market_trades":
+		var tradesMsg marketfeedmodels.CoinbaseTradesMessage
+		if err := json.Unmarshal(data, &tradesMsg); err != nil {
+			return fmt.Errorf("failed to unmarshal market_trades message: %v", err)
+		}
 
-	// 	// Send all the updates through the chanenl
-	// 	for _, e := range tradesMsg.Events {
-	// 		for _, t := range e.Trades {
-	// 			var side uint8 = 0
-	// 			if t.Side == "BUY" {
-	// 				side = 1
-	// 			} else if t.Side != "SELL" {
-	// 				return fmt.Errorf("expected side 'BUY' or 'SELL', instead received: %s", t.Side)
-	// 			}
+		// Send all the updates through the chanenl
+		for _, e := range tradesMsg.Events {
+			for _, t := range e.Trades {
+				var side uint8 = 0
+				if t.Side == "BUY" {
+					side = 1
+				} else if t.Side != "SELL" {
+					return fmt.Errorf("expected side 'BUY' or 'SELL', instead received: %s", t.Side)
+				}
 
-	// 			price, err := strconv.ParseFloat(t.Price, 64)
-	// 			if err != nil {
-	// 				return fmt.Errorf("unable to parse '%s' into a float64", t.Price)
-	// 			}
+				price, err := strconv.ParseFloat(t.Price, 64)
+				if err != nil {
+					return fmt.Errorf("unable to parse '%s' into a float64", t.Price)
+				}
 
-	// 			size, err := strconv.ParseFloat(t.Size, 64)
-	// 			if err != nil {
-	// 				return fmt.Errorf("unable to parse '%s' into a float64", t.Size)
-	// 			}
+				size, err := strconv.ParseFloat(t.Size, 64)
+				if err != nil {
+					return fmt.Errorf("unable to parse '%s' into a float64", t.Size)
+				}
 
-	// 			time, err := time.Parse(time.RFC3339Nano, t.Time)
-	// 			if err != nil {
-	// 				return fmt.Errorf("unable to parse time '%s': %v", t.Time, err)
-	// 			}
-	// 			a.Trades() <- strategyprimitives.NewTrade(t.ProductID, side, price, size, time)
-	// 		}
-	// 	}
+				time, err := time.Parse(time.RFC3339Nano, t.Time)
+				if err != nil {
+					return fmt.Errorf("unable to parse time '%s': %v", t.Time, err)
+				}
+				trades <- strategyprimitives.NewTrade(t.ProductID, side, price, size, time)
+			}
+		}
 	case "ticker":
 		if ticks == nil {
 			break
